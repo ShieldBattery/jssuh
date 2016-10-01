@@ -44,7 +44,7 @@ class BlockDecoder extends Writable {
   }
 
   _process() {
-    while (!this._error) {
+    while (!this._error && this._buf.length > 0) {
       switch (this._state) {
         case BLOCK_DECODE_HEADER: {
           if (this._buf.length < 0xc || this._blockHandlers.length === 0) {
