@@ -18,5 +18,8 @@
   "dependencies": {
     "bl": "^1.1.2",
     "implode-decoder": "^1.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^3.7.0"
   }
 }
