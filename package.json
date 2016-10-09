@@ -17,6 +17,7 @@
   "license": "MIT",
   "dependencies": {
     "bl": "^1.1.2",
+    "iconv-lite": "^0.4.13",
     "implode-decoder": "^1.0.1"
   },
   "devDependencies": {

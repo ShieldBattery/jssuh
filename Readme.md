@@ -33,3 +33,14 @@ header information in following format:
   mapName,
 }
 ```
+
+## Parser options
+You can specify the encoding to used for text strings of replay by passing an option object when
+constructing the parser:
+
+```javascript
+const parser = new ReplayParser({ encoding: 'cp1252' })
+```
+
+The default encoding is `auto`, which attempts to use `cp949` and falls back to `cp1252` if it
+does not work.

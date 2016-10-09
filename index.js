@@ -1,6 +1,7 @@
 'use strict';
 
 const BufferList = require('bl')
+const iconv = require('iconv-lite')
 const decodeImplode = require('implode-decoder')
 
 const { Transform, Writable } = require('stream')
@@ -223,7 +224,10 @@ const funcAsWritable = fun => {
 }
 
 class ReplayParser extends Transform {
-  constructor() {
+  constructor(options) {
+    const opts = Object.assign({
+      encoding: 'auto',
+    }, options)
     super({ objectMode: true })
 
     this._error = false
@@ -246,11 +250,21 @@ class ReplayParser extends Transform {
         return
       }
       const cstring = buf => {
+        let text = buf
         const end = buf.indexOf(0)
-        if (end === -1) {
-          return buf.toString('ascii')
+        if (end !== -1) {
+          text = buf.slice(0, end)
         }
-        return buf.toString('ascii', 0, end)
+        if (opts.encoding === 'auto') {
+          const string = iconv.decode(text, 'cp949')
+          if (string.indexOf('\ufffd') !== -1) {
+            return iconv.decode(text, 'cp1252')
+          } else {
+            return string
+          }
+        } else {
+          return iconv.decode(buf, opts.encoding)
+        }
       }
       const gameName = cstring(buf.slice(0x18, 0x18 + 0x18))
       const mapName = cstring(buf.slice(0x61, 0x61 + 0x20))
