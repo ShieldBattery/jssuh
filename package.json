@@ -4,7 +4,7 @@
   "description": "Reads broodwar replays",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tape ./test/*.js"
   },
   "repository": {
     "type": "git",
@@ -21,6 +21,7 @@
     "implode-decoder": "^1.0.1"
   },
   "devDependencies": {
-    "eslint": "^3.7.0"
+    "eslint": "^3.7.0",
+    "tape": "^4.6.2"
   }
 }

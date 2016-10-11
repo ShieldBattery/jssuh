@@ -48,12 +48,22 @@ class BlockDecoder extends Writable {
     while (!this._error && this._buf.length > 0) {
       switch (this._state) {
         case BLOCK_DECODE_HEADER: {
-          if (this._buf.length < 0xc || this._blockHandlers.length === 0) {
+          if (this._blockHandlers.length === 0) {
+            return
+          }
+          const blockSize = this._blockHandlers[0].size
+          // Empty blocks don't even have their header information, so just signal end of block
+          // and start decoding the next one.
+          if (blockSize === 0) {
+            this._blockHandlers[0].handler.end()
+            this._blockHandlers.shift()
+            break
+          }
+          if (this._buf.length < 0xc) {
             return
           }
           this._blockPos = 0
           // TODO: Could check the checksum
-          const blockSize = this._blockHandlers[0].size
           const chunks = this._buf.readUInt32LE(4)
           this._buf.consume(8)
           const exceptedChunks = Math.ceil(blockSize / MAX_CHUNK_SIZE)
