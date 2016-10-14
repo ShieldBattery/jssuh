@@ -28,8 +28,8 @@ class BlockDecoder extends Writable {
     this._error = false
   }
 
-  nextBlockHandler(size, handler) {
-    this._blockHandlers.push({ size, handler })
+  nextBlockHandler(size, handler, onError) {
+    this._blockHandlers.push({ size, handler, error: onError })
     if (this._state === BLOCK_DECODE_HEADER && this._blockHandlers.length === 1) {
       // We didn't have any handler for this block before, so run `process()`
       this._process()
@@ -68,7 +68,8 @@ class BlockDecoder extends Writable {
           this._buf.consume(8)
           const exceptedChunks = Math.ceil(blockSize / MAX_CHUNK_SIZE)
           if (chunks !== exceptedChunks) {
-            this.emit('error', new Error(`Excepted ${exceptedChunks} chunks, got ${chunks}`))
+            const error = new Error(`Excepted ${exceptedChunks} chunks, got ${chunks}`)
+            this._blockHandlers[0].error(error)
             this._error = true
             return
           }
@@ -92,6 +93,7 @@ class BlockDecoder extends Writable {
             this._output = this._blockHandlers[0].handler
           } else {
             this._output = decodeImplode()
+            this._output.on('error', e => this._blockHandlers[0].error(e))
             this._output.pipe(this._blockHandlers[0].handler)
           }
           this._state = BLOCK_DECODE_DATA
@@ -224,15 +226,6 @@ function commandLength(id, data) {
 
 const REPLAY_MAGIC = 0x53526572
 
-const funcAsWritable = fun => {
-  const stream = new Writable()
-  stream._write = (data, enc, done) => {
-    fun(data)
-    done()
-  }
-  return stream
-}
-
 class ReplayParser extends Transform {
   constructor(options) {
     const opts = Object.assign({
@@ -243,85 +236,88 @@ class ReplayParser extends Transform {
     this._error = false
     this._cmdBuf = new BufferList()
     this._decoder = new BlockDecoder()
-    this._decoder.on('error', err => this.emit('error', err))
 
-    this._nextBlockHandler(0x4, new BufferList((err, buf) => {
-      if (err) {
-        this._emitError(err)
-        return
-      }
-      if (buf.readUInt32LE(0) !== REPLAY_MAGIC) {
-        this._emitError(new Error('Not a replay file'))
-      }
-    }))
-    this._nextBlockHandler(0x279, new BufferList((err, buf) => {
-      if (err) {
-        this.emit('error', err)
-        return
-      }
-      const cstring = buf => {
-        let text = buf
-        const end = buf.indexOf(0)
-        if (end !== -1) {
-          text = buf.slice(0, end)
-        }
-        if (opts.encoding === 'auto') {
-          const string = iconv.decode(text, 'cp949')
-          if (string.indexOf('\ufffd') !== -1) {
-            return iconv.decode(text, 'cp1252')
+    const decodeToBuffer = size => (
+      new Promise((res, rej) => {
+        this._decoder.nextBlockHandler(size, new BufferList((err, buf) => {
+          if (err) {
+            rej(err)
           } else {
-            return string
+            res(buf)
           }
-        } else {
-          return iconv.decode(buf, opts.encoding)
+        }), e => rej(e))
+      })
+    )
+    const streamBlockTo = (size, func) => (
+      new Promise((res, rej) => {
+        const stream = new Writable()
+        stream.on('error', e => rej(e))
+        stream.on('finish', () => res())
+        stream._write = (data, enc, done) => {
+          try {
+            func(data)
+          } catch (e) {
+            rej(e)
+          }
+          done()
         }
-      }
-      const gameName = cstring(buf.slice(0x18, 0x18 + 0x18))
-      const mapName = cstring(buf.slice(0x61, 0x61 + 0x20))
-      // TODO: Players etc
-      const header = {
-        gameName,
-        mapName,
-      }
-      this.emit('replayHeader', header)
-    }))
-    this._nextBlockHandler(0x4, new BufferList((err, buf) => {
-      if (err) {
-        this._emitError(err)
-        return
-      }
-      const cmdsSize = buf.readUInt32LE(0)
-      this._nextBlockHandler(cmdsSize, funcAsWritable(data => this._onCommandData(data)))
-      this._nextBlockHandler(0x4, new BufferList((err, buf) => {
-        if (err) {
-          this._emitError(err)
-          return
+        this._decoder.nextBlockHandler(size, stream, e => rej(e))
+      })
+    )
+
+    const magic = decodeToBuffer(0x4)
+      .then(buf => {
+        if (buf.readUInt32LE(0) !== REPLAY_MAGIC) {
+          throw new Error('Not a replay file')
         }
-        const chkSize = buf.readUInt32LE(0)
-        // We don't really care about the chk
-        this._nextBlockHandler(chkSize, funcAsWritable(() => { }))
-      }))
-    }))
+      }, () => {
+        throw new Error('Not a replay file')
+      })
+    const header = magic.then(() => decodeToBuffer(0x279))
+      .then(buf => this._emitHeader(buf, opts.encoding))
+    const cmdsSize = magic.then(() => decodeToBuffer(0x4))
+      .then(buf => buf.readUInt32LE(0))
+
+    // Wait for header to be emitted before emitting any commands
+    const both = Promise.all([header, cmdsSize]).then(([, b]) => b)
+    const cmds = both.then(cmdsSize => streamBlockTo(cmdsSize, data => this._onCommandData(data)))
+    const chkSize = both.then(() => decodeToBuffer(0x4))
+      .then(buf => buf.readUInt32LE(0))
+
+    // Currently ignoring the chk, but it could be piped somewhere as well.
+    const chk = chkSize.then(chkSize => streamBlockTo(chkSize, () => {}))
+
+    Promise.all([cmds, chk])
+      .catch(e => this.emit('error', e))
+      .then(() => this.end())
   }
 
-  _nextBlockHandler(size, stream) {
-    // Filter to block additional data from BlockDecoder after an error occurs
-    const errorFilter = new Transform()
-    errorFilter._transform = (data, enc, done) => {
-      if (!this._error) {
-        stream.write(data)
+  _emitHeader(buf, encoding) {
+    const cstring = buf => {
+      let text = buf
+      const end = buf.indexOf(0)
+      if (end !== -1) {
+        text = buf.slice(0, end)
       }
-      done()
+      if (encoding === 'auto') {
+        const string = iconv.decode(text, 'cp949')
+        if (string.indexOf('\ufffd') !== -1) {
+          return iconv.decode(text, 'cp1252')
+        } else {
+          return string
+        }
+      } else {
+        return iconv.decode(buf, encoding)
+      }
     }
-    errorFilter.on('finish', () => {
-      if (!this._error) {
-        stream.end()
-      }
-    })
-    errorFilter.on('error', err => {
-      this._emitError(err)
-    })
-    this._decoder.nextBlockHandler(size, errorFilter)
+    const gameName = cstring(buf.slice(0x18, 0x18 + 0x18))
+    const mapName = cstring(buf.slice(0x61, 0x61 + 0x20))
+    // TODO: Players etc
+    const header = {
+      gameName,
+      mapName,
+    }
+    this.emit('replayHeader', header)
   }
 
   _transform(block, enc, done) {
@@ -329,13 +325,6 @@ class ReplayParser extends Transform {
       this._decoder.write(block)
     }
     done()
-  }
-
-  _emitError(err) {
-    if (!this._error) {
-      this.emit('error', err)
-      this._error = true
-    }
   }
 
   _onCommandData(data) {
@@ -357,8 +346,7 @@ class ReplayParser extends Transform {
         const id = this._cmdBuf.readUInt8(pos)
         const len = commandLength(id, this._cmdBuf.slice(pos + 1))
         if (len === null || pos + len > frameEnd) {
-          this._emitError(new Error(`Invalid command 0x${id.toString(16)} on frame ${frame}`))
-          return
+          throw new Error(`Invalid command 0x${id.toString(16)} on frame ${frame}`)
         }
         pos += len
 
