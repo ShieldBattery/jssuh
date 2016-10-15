@@ -233,7 +233,6 @@ class ReplayParser extends Transform {
     }, options)
     super({ objectMode: true })
 
-    this._error = false
     this._cmdBuf = new BufferList()
     this._decoder = new BlockDecoder()
 
@@ -321,9 +320,7 @@ class ReplayParser extends Transform {
   }
 
   _transform(block, enc, done) {
-    if (!this._error) {
-      this._decoder.write(block)
-    }
+    this._decoder.write(block)
     done()
   }
 
