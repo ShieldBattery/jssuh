@@ -311,10 +311,39 @@ class ReplayParser extends Transform {
     }
     const gameName = cstring(buf.slice(0x18, 0x18 + 0x18))
     const mapName = cstring(buf.slice(0x61, 0x61 + 0x20))
-    // TODO: Players etc
+    const gameType = buf.readUInt16LE(0x81)
+    const gameSubtype = buf.readUInt16LE(0x83)
+
+    const raceStr = race => {
+      switch (race) {
+        case 0: return 'zerg'
+        case 1: return 'terran'
+        case 2: return 'protoss'
+        default: return 'unknown'
+      }
+    }
+    const players = []
+    // There are actually 12 players, but one can just assume 8-10 be unused and 11 to be neutral
+    for (let i = 0; i < 8; i++) {
+      const offset = 0xa1 + 0x24 * i
+      const type = buf.readUInt8(offset + 0x8)
+      // TODO: Not sure if UMS maps can have other types that should be reported here
+      if (type === 1 || type === 2) {
+        players.push({
+          id: buf.readUInt32LE(offset),
+          isComputer: type === 1,
+          race: raceStr(buf.readUInt8(offset + 0x9)),
+          name: cstring(buf.slice(offset + 0xb, offset + 0xb + 0x19)),
+          team: buf.readUInt8(offset + 0xa),
+        })
+      }
+    }
     const header = {
       gameName,
       mapName,
+      gameType,
+      gameSubtype,
+      players,
     }
     this.emit('replayHeader', header)
   }

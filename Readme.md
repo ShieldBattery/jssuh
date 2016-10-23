@@ -31,6 +31,29 @@ header information in following format:
   gameName,
   // The map title.
   mapName,
+  // Game type (melee, ums, etc). Currently just exposed as a integer
+  gameType,
+  // Game type modifier (Top vs bottom team layout, greed victory conditions, etc).
+  gameSubtype,
+  // Array of players in the game.
+  players,
+}
+```
+
+The player objects have the following fields:
+```javascript
+{
+  // Player id. Matters mostly in UMS which can have preplaced units for specific players.
+  // (Not sure if this is before or after start location randomization in maps that have it)
+  id,
+  // Name of the player.
+  name,
+  // True if the player is a computer, false if human.
+  isComputer,
+  // One of the following: 'zerg', 'terran', 'protoss', 'unknown'
+  race,
+  // Team (1-based) in team games and UMS, meaningless otherwise.
+  team,
 }
 ```
 
