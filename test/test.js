@@ -41,13 +41,14 @@ test('Bad file', t => {
 test('Regular replay', t => {
   const replay = fs.createReadStream('test/things.rep')
     .pipe(new ReplayParser())
-  t.plan(10)
+  t.plan(11)
   replay.on('replayHeader', header => {
     t.deepEqual(header.players.length, 4)
     t.deepEqual(header.gameName, 'neiv')
     t.deepEqual(header.mapName, 'Shadowlands')
     t.deepEqual(header.gameType, 15)
     t.deepEqual(header.gameSubtype, 2)
+    t.deepEqual(header.durationFrames, 894)
     for (const player of header.players) {
       if (player.name === 'neiv') {
         t.deepEqual(player.race, 'zerg')

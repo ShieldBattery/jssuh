@@ -6,8 +6,19 @@ const ReplayParser = require('./index.js')
 const reppi = fs.createReadStream(process.argv[2])
   .pipe(new ReplayParser())
 
-reppi.on('replayHeader', ({ gameName, mapName, gameType, gameSubtype, players }) => {
+reppi.on('replayHeader', header => {
+  const {
+    gameName,
+    mapName,
+    gameType,
+    gameSubtype,
+    players,
+    durationFrames,
+  } = header
   console.log(`${gameName} on ${mapName} (Game type ${gameType}, ${gameSubtype})`)
+  const minutes = Math.floor(durationFrames / 24 / 60)
+  const seconds = Math.floor(durationFrames / 24) % 60
+  console.log(`Duration: ${minutes}:${seconds}`)
   for (const { name, id, race, team, isComputer } of players) {
     if (isComputer) {
       console.log(`Computer ${name} (${id}): Race ${race}, team ${team}`)

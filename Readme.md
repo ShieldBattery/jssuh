@@ -37,6 +37,8 @@ header information in following format:
   gameSubtype,
   // Array of players in the game.
   players,
+  // The duration of the game, in frames (1 / 24th of a second on fastest speed).
+  durationFrames,
 }
 ```
 
