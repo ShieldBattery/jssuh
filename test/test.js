@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto')
 const fs = require('fs')
 const ReplayParser = require('../')
 const { test } = require('tape')
@@ -63,4 +64,16 @@ test('Regular replay', t => {
   replay.on('error', e => t.fail(e))
   replay.on('data', () => { })
   replay.on('finish', () => t.pass('ok'))
+})
+
+test('Chk extraction', t => {
+  t.plan(1)
+  const replay = fs.createReadStream('test/things.rep')
+    .pipe(new ReplayParser())
+
+  const hash = crypto.createHash('sha1')
+  replay.pipeChk(hash)
+
+  replay.resume()
+  hash.on('data', x => t.deepEqual(x.toString('hex'), '0abf186309fd202ba1f11511fed57b48669a6e07'))
 })

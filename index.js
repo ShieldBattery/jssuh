@@ -28,12 +28,15 @@ class BlockDecoder extends Writable {
     this._error = false
   }
 
-  nextBlockHandler(size, handler, onError) {
-    this._blockHandlers.push({ size, handler, error: onError })
-    if (this._state === BLOCK_DECODE_HEADER && this._blockHandlers.length === 1) {
-      // We didn't have any handler for this block before, so run `process()`
-      this._process()
-    }
+  // The promise resolves once the entire block has been parsed
+  nextBlockHandler(size, handler) {
+    return new Promise((res, rej) => {
+      this._blockHandlers.push({ size, handler, resolve: res, reject: rej })
+      if (this._state === BLOCK_DECODE_HEADER && this._blockHandlers.length === 1) {
+        // We didn't have any handler for this block before, so run `process()`
+        this._process()
+      }
+    })
   }
 
   _write(block, enc, done) {
@@ -69,7 +72,7 @@ class BlockDecoder extends Writable {
           const exceptedChunks = Math.ceil(blockSize / MAX_CHUNK_SIZE)
           if (chunks !== exceptedChunks) {
             const error = new Error(`Excepted ${exceptedChunks} chunks, got ${chunks}`)
-            this._blockHandlers[0].error(error)
+            this._blockHandlers[0].reject(error)
             this._error = true
             return
           }
@@ -93,7 +96,7 @@ class BlockDecoder extends Writable {
             this._output = this._blockHandlers[0].handler
           } else {
             this._output = decodeImplode()
-            this._output.on('error', e => this._blockHandlers[0].error(e))
+            this._output.on('error', e => this._blockHandlers[0].reject(e))
             this._output.pipe(this._blockHandlers[0].handler)
           }
           this._state = BLOCK_DECODE_DATA
@@ -109,6 +112,7 @@ class BlockDecoder extends Writable {
               this._state = BLOCK_DECODE_HEADER
               this._output.end()
               this._output = null
+              this._blockHandlers[0].resolve()
               this._blockHandlers.shift()
             } else {
               this._state = BLOCK_DECODE_CHUNK
@@ -235,6 +239,7 @@ class ReplayParser extends Transform {
 
     this._cmdBuf = new BufferList()
     this._decoder = new BlockDecoder()
+    this._chkPipe = null
 
     const decodeToBuffer = size => (
       new Promise((res, rej) => {
@@ -244,14 +249,12 @@ class ReplayParser extends Transform {
           } else {
             res(buf)
           }
-        }), e => rej(e))
+        })).catch(rej)
       })
     )
     const streamBlockTo = (size, func) => (
       new Promise((res, rej) => {
         const stream = new Writable()
-        stream.on('error', e => rej(e))
-        stream.on('finish', () => res())
         stream._write = (data, enc, done) => {
           try {
             func(data)
@@ -260,7 +263,7 @@ class ReplayParser extends Transform {
           }
           done()
         }
-        this._decoder.nextBlockHandler(size, stream, e => rej(e))
+        this._decoder.nextBlockHandler(size, stream).then(res, rej)
       })
     )
 
@@ -283,12 +286,22 @@ class ReplayParser extends Transform {
     const chkSize = both.then(() => decodeToBuffer(0x4))
       .then(buf => buf.readUInt32LE(0))
 
-    // Currently ignoring the chk, but it could be piped somewhere as well.
-    const chk = chkSize.then(chkSize => streamBlockTo(chkSize, () => {}))
+    const chk = chkSize.then(chkSize => {
+      if (this._chkPipe) {
+        return this._decoder.nextBlockHandler(chkSize, this._chkPipe)
+      } else {
+        // Discard
+        return streamBlockTo(chkSize, () => {})
+      }
+    })
 
     Promise.all([cmds, chk])
       .catch(e => this.emit('error', e))
       .then(() => this.end())
+  }
+
+  pipeChk(stream) {
+    this._chkPipe = stream
   }
 
   _emitHeader(buf, encoding) {

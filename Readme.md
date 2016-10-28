@@ -1,7 +1,9 @@
 # jssuh
 
 jssuh reads bw replays =)
-Though it isn't really complete yet.
+
+The most notable thing not currently implemented is action-specific data: The library can
+read actions and exposes their raw bytes, but understanding the data is currently left to user.
 
 See [example.js](./example.js) for a simple example.
 
@@ -69,3 +71,7 @@ const parser = new ReplayParser({ encoding: 'cp1252' })
 
 The default encoding is `auto`, which attempts to use `cp949` and falls back to `cp1252` if it
 does not work.
+
+## parser.pipeChk(stream)
+The replay's map (scenario.chk) can be accessed with `parser.pipeChk(stream)`. See
+[bw-chk](https://github.com/neivv/bw-chk) for parsing the map data.
