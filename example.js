@@ -14,8 +14,14 @@ reppi.on('replayHeader', header => {
     gameSubtype,
     players,
     durationFrames,
+    seed,
   } = header
   console.log(`${gameName} on ${mapName} (Game type ${gameType}, ${gameSubtype})`)
+
+  // Seed is just generated with C stdlib `time()`, so it can be used to figure out timestamp.
+  const date = new Date(seed * 1000)
+  console.log(`Played on ${date.toLocaleString()}`)
+
   const minutes = Math.floor(durationFrames / 24 / 60)
   const seconds = Math.floor(durationFrames / 24) % 60
   console.log(`Duration: ${minutes}:${seconds}`)
@@ -28,6 +34,8 @@ reppi.on('replayHeader', header => {
   }
 })
 
+// `ReplayParser` is a `Transform` stream, which transforms binary data to replay actions.
+// But if we arent't interested in actions, we'll need to call `reppi.resume()`, explicity.
 reppi.on('data', ({ id, frame, player }) => {
   const name = ReplayParser.commands()[id].name
   console.log(`Command ${name} @ frame ${frame} for player ${player}`)
