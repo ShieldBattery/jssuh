@@ -2,6 +2,10 @@
 
 jssuh reads bw replays =)
 
+[![NPM](https://img.shields.io/npm/v/jssuh.svg?style=flat)](https://www.npmjs.org/package/jssuh)
+
+[![NPM](https://nodei.co/npm/jssuh.png)](https://www.npmjs.org/package/jssuh)
+
 The most notable thing not currently implemented is action-specific data: The library can
 read actions and exposes their raw bytes, but understanding the data is currently left to user.
 
