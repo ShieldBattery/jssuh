@@ -327,6 +327,7 @@ class ReplayParser extends Transform {
     const gameType = buf.readUInt16LE(0x81)
     const gameSubtype = buf.readUInt16LE(0x83)
     const durationFrames = buf.readUInt32LE(0x1)
+    const seed = buf.readUInt32LE(0x8)
 
     const raceStr = race => {
       switch (race) {
@@ -359,6 +360,7 @@ class ReplayParser extends Transform {
       gameSubtype,
       players,
       durationFrames,
+      seed,
     }
     this.emit('replayHeader', header)
   }

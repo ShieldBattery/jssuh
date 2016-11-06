@@ -41,6 +41,8 @@ header information in following format:
   players,
   // The duration of the game, in frames (1 / 24th of a second on fastest speed).
   durationFrames,
+  // Initial random seed, which is also the timestamp of the replay
+  seed,
 }
 ```
 
