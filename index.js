@@ -276,7 +276,10 @@ class ReplayParser extends Transform {
         throw new Error('Not a replay file')
       })
     const header = magic.then(() => decodeToBuffer(0x279))
-      .then(buf => this._emitHeader(buf, opts.encoding))
+      .then(buf => {
+        this._setupPlayerMappings(buf)
+        this._emitHeader(buf, opts.encoding)
+      })
     const cmdsSize = magic.then(() => decodeToBuffer(0x4))
       .then(buf => buf.readUInt32LE(0))
 
@@ -302,6 +305,18 @@ class ReplayParser extends Transform {
 
   pipeChk(stream) {
     this._chkPipe = stream
+  }
+
+  _setupPlayerMappings(buf) {
+    this._stormPlayerToGamePlayer = []
+    for (let i = 0; i < 8; i++) {
+      const offset = 0xa1 + 0x24 * i
+      const stormId = buf.readInt32LE(offset + 0x4)
+      if (stormId >= 0) {
+        this._stormPlayerToGamePlayer[stormId] = buf.readUInt32LE(offset)
+        console.log(`Storm ${stormId} = ${buf.readUInt32LE(offset)}`)
+      }
+    }
   }
 
   _emitHeader(buf, encoding) {
@@ -384,7 +399,7 @@ class ReplayParser extends Transform {
       const frame = this._cmdBuf.readUInt32LE(0)
       let pos = 5
       while (pos < frameEnd) {
-        const player = this._cmdBuf.readUInt8(pos)
+        const player = this._stormPlayerToGamePlayer[this._cmdBuf.readUInt8(pos)]
         pos += 1
         const id = this._cmdBuf.readUInt8(pos)
         const len = commandLength(id, this._cmdBuf.slice(pos + 1))
