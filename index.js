@@ -406,13 +406,14 @@ class ReplayParser extends Transform {
         if (len === null || pos + len > frameEnd) {
           throw new Error(`Invalid command 0x${id.toString(16)} on frame ${frame}`)
         }
+        const data = this._cmdBuf.slice(pos + 1, pos + len)
         pos += len
 
         this.push({
           frame,
           id,
           player,
-          data: this._cmdBuf.slice(pos + 1, pos + len),
+          data,
         })
       }
       this._cmdBuf.consume(frameEnd)
