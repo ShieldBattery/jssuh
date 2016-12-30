@@ -145,7 +145,7 @@ const CMDS = (() => {
     SAVE: fun(0x6, saveLength),
     LOAD: fun(0x7, saveLength),
     RESTART: c(0x8, 1),
-    SELECT: c(0x9, selectLength),
+    SELECT: fun(0x9, selectLength),
     SELECTION_ADD: fun(0xa, selectLength),
     SELECTION_REMOVE: fun(0xb, selectLength),
     BUILD: c(0xc, 8),
