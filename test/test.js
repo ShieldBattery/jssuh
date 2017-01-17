@@ -78,3 +78,32 @@ test('Chk extraction', t => {
   replay.resume()
   hash.on('data', x => t.deepEqual(x.toString('hex'), '0abf186309fd202ba1f11511fed57b48669a6e07'))
 })
+
+test('Actions', t => {
+  // Tests at least following things:
+  // - Multiple select actions in a single frame
+  // - Players being correct
+  // - Action data
+  t.plan(7)
+  const replay = fs.createReadStream('test/bug1.rep')
+    .pipe(new ReplayParser())
+
+  const actions = [
+    { id: 0x9, data: Buffer.from([0x4, 0xb, 0xe, 0xc, 0xe, 0xd, 0xe, 0xe, 0xe]) },
+    { id: 0x9, data: Buffer.from([0x1, 0x2f, 0xe]) },
+    { id: 0x9, data: Buffer.from([0x4, 0xb, 0xe, 0xc, 0xe, 0xd, 0xe, 0xe, 0xe]) },
+    { id: 0x9, data: Buffer.from([0x1, 0x2f, 0xe]) },
+    { id: 0x9, data: Buffer.from([0x4, 0xb, 0xe, 0xc, 0xe, 0xd, 0xe, 0xe, 0xe]) },
+    { id: 0x14, data: Buffer.from([0xce, 0x0, 0x87, 0xe, 0x0, 0x0, 0xe4, 0x0, 0x0]) },
+  ]
+  replay.on('data', x => {
+    if (actions.length) {
+      const compare = actions.shift()
+      compare.frame = 104
+      compare.player = 6
+      t.deepEqual(compare, x)
+    }
+  })
+  replay.on('error', e => t.fail(e))
+  replay.on('finish', () => t.pass('ok'))
+})
