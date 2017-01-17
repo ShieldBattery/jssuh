@@ -59,6 +59,7 @@ class BlockDecoder extends Writable {
           // and start decoding the next one.
           if (blockSize === 0) {
             this._blockHandlers[0].handler.end()
+            this._blockHandlers[0].resolve()
             this._blockHandlers.shift()
             break
           }
@@ -240,6 +241,7 @@ class ReplayParser extends Transform {
     this._cmdBuf = new BufferList()
     this._decoder = new BlockDecoder()
     this._chkPipe = null
+    this._finished = false
 
     const decodeToBuffer = size => (
       new Promise((res, rej) => {
@@ -300,7 +302,10 @@ class ReplayParser extends Transform {
 
     Promise.all([cmds, chk])
       .catch(e => this.emit('error', e))
-      .then(() => this.end())
+      .then(() => {
+        this._finished = true
+        this.end()
+      })
   }
 
   pipeChk(stream) {
@@ -314,7 +319,6 @@ class ReplayParser extends Transform {
       const stormId = buf.readInt32LE(offset + 0x4)
       if (stormId >= 0) {
         this._stormPlayerToGamePlayer[stormId] = buf.readUInt32LE(offset)
-        console.log(`Storm ${stormId} = ${buf.readUInt32LE(offset)}`)
       }
     }
   }
@@ -382,6 +386,13 @@ class ReplayParser extends Transform {
 
   _transform(block, enc, done) {
     this._decoder.write(block)
+    done()
+  }
+
+  _flush(done) {
+    if (!this._finished) {
+      this.emit('error', new Error('Unexcepted end of file'))
+    }
     done()
   }
 

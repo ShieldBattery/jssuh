@@ -107,3 +107,25 @@ test('Actions', t => {
   replay.on('error', e => t.fail(e))
   replay.on('finish', () => t.pass('ok'))
 })
+
+test('Missing chk', t => {
+  // Should still emit the actions though
+  t.plan(1)
+  const replay = fs.createReadStream('test/no-chk.rep')
+    .pipe(new ReplayParser())
+
+  let actionCount = 0
+  replay.on('data', () => {
+    actionCount += 1
+  })
+  let ok = false
+  replay.on('error', () => {
+    ok = true
+    t.deepEqual(actionCount, 16)
+  })
+  replay.on('finish', () => {
+    if (!ok) {
+      t.fail('Excepted error')
+    }
+  })
+})
