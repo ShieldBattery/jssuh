@@ -44,3 +44,6 @@ reppi.on('data', ({ id, frame, player }) => {
 reppi.on('error', err => {
   console.log(`Rip rap nib nab ${err}`)
 })
+reppi.on('end', err => {
+  console.log(`Done`)
+})

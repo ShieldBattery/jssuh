@@ -123,9 +123,40 @@ test('Missing chk', t => {
     ok = true
     t.deepEqual(actionCount, 16)
   })
-  replay.on('finish', () => {
+  replay.on('end', () => {
     if (!ok) {
       t.fail('Excepted error')
     }
+  })
+})
+
+test('SCR replay', t => {
+  const replay = fs.createReadStream('test/scr_replay.rep')
+    .pipe(new ReplayParser())
+  t.plan(12)
+  replay.on('replayHeader', header => {
+    t.deepEqual(header.players.length, 2)
+    t.deepEqual(header.gameName, 'u')
+    t.deepEqual(header.gameType, 2)
+    t.deepEqual(header.gameSubtype, 1)
+    for (const player of header.players) {
+      if (player.name === 'u') {
+        t.deepEqual(player.race, 'terran')
+        t.deepEqual(player.isComputer, false)
+      }
+      if (player.name === 'Sargas Tribe') {
+        t.deepEqual(player.race, 'protoss')
+        t.deepEqual(player.isComputer, true)
+      }
+    }
+  })
+  let actionCount = 0
+  replay.on('data', cmd => {
+    t.deepEqual(cmd.player, 0)
+    actionCount += 1
+  })
+  replay.on('error', e => t.fail(e))
+  replay.on('end', () => {
+    t.deepEqual(actionCount, 3)
   })
 })

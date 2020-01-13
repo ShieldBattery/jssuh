@@ -5,6 +5,7 @@ const iconv = require('iconv-lite')
 const decodeImplode = require('implode-decoder')
 
 const { Transform, Writable } = require('stream')
+const zlib = require('zlib')
 
 // The replay file contains 6 separate blocks, which are in the following format:
 // { u32 checksum, u32 chunk_count, { u32 size, u8 data[size] } chunks[chunk_count] }
@@ -14,7 +15,10 @@ const { Transform, Writable } = require('stream')
 const BLOCK_DECODE_HEADER = 0
 const BLOCK_DECODE_CHUNK = 1
 const BLOCK_DECODE_DATA = 2
+const BLOCK_DECODE_RAW = 3
 const MAX_CHUNK_SIZE = 0x2000
+const MODE_BLOCK = 0
+const MODE_RAW = 1
 
 class BlockDecoder extends Writable {
   constructor() {
@@ -26,17 +30,34 @@ class BlockDecoder extends Writable {
     this._blockPos = 0
     this._chunkRemaining = 0
     this._error = false
+    this._inflate = false
   }
 
   // The promise resolves once the entire block has been parsed
   nextBlockHandler(size, handler) {
     return new Promise((res, rej) => {
-      this._blockHandlers.push({ size, handler, resolve: res, reject: rej })
+      this._blockHandlers.push({ size, handler, resolve: res, reject: rej, mode: MODE_BLOCK })
       if (this._state === BLOCK_DECODE_HEADER && this._blockHandlers.length === 1) {
         // We didn't have any handler for this block before, so run `process()`
         this._process()
       }
     })
+  }
+
+  // Reads just `size` bytes from stream without any format.
+  // Returned promise resolves once all bytes have been read.
+  rawBlockHandler(size, handler) {
+    return new Promise((res, rej) => {
+      this._blockHandlers.push({ size, handler, resolve: res, reject: rej, mode: MODE_RAW })
+      if (this._state === BLOCK_DECODE_HEADER && this._blockHandlers.length === 1) {
+        // We didn't have any handler for this block before, so run `process()`
+        this._process()
+      }
+    })
+  }
+
+  useInflate() {
+    this._inflate = true
   }
 
   _write(block, enc, done) {
@@ -45,6 +66,16 @@ class BlockDecoder extends Writable {
       this._process()
     }
     done()
+  }
+
+  _requireBufLength(len) {
+    if (this._buf.length < len) {
+      if (this._end) {
+        this._blockHandlers[0].reject(new Error('Unexpected end of file'))
+      }
+      return false
+    }
+    return true
   }
 
   _process() {
@@ -63,7 +94,11 @@ class BlockDecoder extends Writable {
             this._blockHandlers.shift()
             break
           }
-          if (this._buf.length < 0xc) {
+          if (this._blockHandlers[0].mode === MODE_RAW) {
+            this._state = BLOCK_DECODE_RAW
+            break
+          }
+          if (!this._requireBufLength(0xc)) {
             return
           }
           this._blockPos = 0
@@ -80,7 +115,7 @@ class BlockDecoder extends Writable {
           this._state = BLOCK_DECODE_CHUNK
         } break
         case BLOCK_DECODE_CHUNK: {
-          if (this._buf.length < 0x4) {
+          if (!this._requireBufLength(0x4)) {
             return
           }
           const remaining = this._blockHandlers[0].size - this._blockPos
@@ -96,32 +131,68 @@ class BlockDecoder extends Writable {
           if (outSize === inSize) {
             this._output = this._blockHandlers[0].handler
           } else {
-            this._output = decodeImplode()
-            this._output.on('error', e => this._blockHandlers[0].reject(e))
+            if (this._inflate) {
+              this._output = zlib.createInflate()
+            } else {
+              this._output = decodeImplode()
+            }
+            const rej = this._blockHandlers[0].reject
+            this._output.on('error', e => rej(e))
             this._output.pipe(this._blockHandlers[0].handler)
           }
           this._state = BLOCK_DECODE_DATA
         } break
+        case BLOCK_DECODE_RAW: {
+          if (this._output) {
+            // Remove the possible event listeners that have been added
+            // if the previous chunk was decodeImplode-piped to _output
+            this._output.unpipe()
+          }
+          this._output = this._blockHandlers[0].handler
+          this._state = BLOCK_DECODE_DATA
+          this._chunkRemaining = this._blockHandlers[0].size
+        } break
         case BLOCK_DECODE_DATA: {
+          if (!this._requireBufLength(0x1)) {
+            return
+          }
           const size = Math.min(this._chunkRemaining, this._buf.length)
           this._chunkRemaining -= size
           this._output.write(this._buf.slice(0, size))
           this._buf.consume(size)
           if (this._chunkRemaining === 0) {
-            this._blockPos += MAX_CHUNK_SIZE
-            if (this._blockPos >= this._blockHandlers[0].size) {
+            let end = false
+            switch (this._blockHandlers[0].mode) {
+              case MODE_BLOCK: {
+                this._blockPos += MAX_CHUNK_SIZE
+                if (this._blockPos >= this._blockHandlers[0].size) {
+                  end = true
+                } else {
+                  this._state = BLOCK_DECODE_CHUNK
+                }
+              } break
+              case MODE_RAW: {
+                end = true
+              } break
+            }
+            if (end) {
               this._state = BLOCK_DECODE_HEADER
-              this._output.end()
+              const res = this._blockHandlers[0].resolve
+              this._output.end(() => {
+                res()
+              })
               this._output = null
-              this._blockHandlers[0].resolve()
               this._blockHandlers.shift()
-            } else {
-              this._state = BLOCK_DECODE_CHUNK
             }
           }
         } break
       }
     }
+  }
+
+  noMoreData() {
+    this._end = true
+    this._process()
   }
 }
 
@@ -140,6 +211,12 @@ const CMDS = (() => {
         return null;
     }
     return 2 + data.readUInt8(0) * 2
+  }
+  const extSelectLength = data => {
+    if (data.length < 1) {
+        return null;
+    }
+    return 2 + data.readUInt8(0) * 4
   }
   return {
     KEEP_ALIVE: c(0x5, 1),
@@ -213,6 +290,14 @@ const CMDS = (() => {
     MERGE_DARK_ARCHON: c(0x5a, 1),
     MAKE_GAME_PUBLIC: c(0x5b, 1),
     CHAT: c(0x5c, 82),
+    SET_TURN_RATE: c(0x5f, 0x2),
+    RIGHT_CLICK_EXT: c(0x60, 0xc),
+    TARGETED_ORDER_EXT: c(0x61, 0xd),
+    UNLOAD_EXT: c(0x62, 5),
+    SELECT_EXT: fun(0x63, extSelectLength),
+    SELECTION_ADD_EXT: fun(0x64, extSelectLength),
+    SELECTION_REMOVE_EXT: fun(0x65, extSelectLength),
+    NEW_NETWORK_SPEED: c(0x66, 4),
   }
 })()
 
@@ -230,6 +315,7 @@ function commandLength(id, data) {
 }
 
 const REPLAY_MAGIC = 0x53526572
+const REPLAY_MAGIC_SCR = 0x53526573
 
 class ReplayParser extends Transform {
   constructor(options) {
@@ -243,15 +329,18 @@ class ReplayParser extends Transform {
     this._chkPipe = null
     this._finished = false
 
+    const bufferListStreamPromise = (res, rej) => (
+      new BufferList((err, buf) => {
+        if (err) {
+          rej(err)
+        } else {
+          res(buf)
+        }
+      })
+    )
     const decodeToBuffer = size => (
       new Promise((res, rej) => {
-        this._decoder.nextBlockHandler(size, new BufferList((err, buf) => {
-          if (err) {
-            rej(err)
-          } else {
-            res(buf)
-          }
-        })).catch(rej)
+        this._decoder.nextBlockHandler(size, bufferListStreamPromise(res, rej)).catch(rej)
       })
     )
     const streamBlockTo = (size, func) => (
@@ -270,9 +359,18 @@ class ReplayParser extends Transform {
     )
 
     const magic = decodeToBuffer(0x4)
-      .then(buf => {
-        if (buf.readUInt32LE(0) !== REPLAY_MAGIC) {
+      .then(async buf => {
+        const magic = buf.readUInt32LE(0)
+        if (magic !== REPLAY_MAGIC && magic !== REPLAY_MAGIC_SCR) {
           throw new Error('Not a replay file')
+        }
+        this._is_scr = magic === REPLAY_MAGIC_SCR
+        if (this._is_scr) {
+          this._decoder.useInflate()
+          const offset = await new Promise((res, rej) => {
+            this._decoder.rawBlockHandler(4, bufferListStreamPromise(res, rej)).catch(rej)
+          })
+          this._scr_offset = offset.readUInt32LE(0)
         }
       }, () => {
         throw new Error('Not a replay file')
@@ -305,6 +403,9 @@ class ReplayParser extends Transform {
       .then(() => {
         this._finished = true
         this.end()
+        if (this._onEnd) {
+          this._onEnd()
+        }
       })
   }
 
@@ -390,10 +491,12 @@ class ReplayParser extends Transform {
   }
 
   _flush(done) {
-    if (!this._finished) {
-      this.emit('error', new Error('Unexcepted end of file'))
+    if (this._finished) {
+      done()
+    } else {
+      this._decoder.noMoreData()
+      this._onEnd = done
     }
-    done()
   }
 
   _onCommandData(data) {
