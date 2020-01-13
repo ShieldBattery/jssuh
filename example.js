@@ -47,3 +47,24 @@ reppi.on('error', err => {
 reppi.on('end', err => {
   console.log(`Done`)
 })
+
+reppi.scrSection('SKIN', 0xaf * 2 * 16, skin_data => {
+  console.log(`0x${skin_data.length.toString(16)} bytes of skin data`)
+})
+reppi.scrSection('LMTS', 0x1c, limits => {
+  console.log(`Limits:`)
+  console.log(`  Images: ${limits.readUInt32LE(0)}`)
+  console.log(`  Sprites: ${limits.readUInt32LE(4)}`)
+  console.log(`  Thingies(?): ${limits.readUInt32LE(8)}`)
+  console.log(`  Units: ${limits.readUInt32LE(0xc)}`)
+  console.log(`  Bullets: ${limits.readUInt32LE(0x10)}`)
+  console.log(`  Orders: ${limits.readUInt32LE(0x14)}`)
+  console.log(`  Fog sprites(?): ${limits.readUInt32LE(0x18)}`)
+})
+reppi.scrSection('BFIX', 0x8, bfix => {
+  console.log(`BFIX: ${bfix.toString('hex')}`)
+})
+reppi.scrSection('CCLR', 0xc0, colors => {
+  console.log(`Custom color: ${colors.length} bytes`)
+})
+

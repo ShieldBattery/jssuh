@@ -11,14 +11,18 @@ const zlib = require('zlib')
 // { u32 checksum, u32 chunk_count, { u32 size, u8 data[size] } chunks[chunk_count] }
 // The data is split into 0x2000 byte chunks if it is large enough.
 // If chunk size is less than the excepted, the chunk has been compressed with implode.
+//
+// SCR data is { u32 section_tag, u32 size, {block} }
 
 const BLOCK_DECODE_HEADER = 0
 const BLOCK_DECODE_CHUNK = 1
 const BLOCK_DECODE_DATA = 2
 const BLOCK_DECODE_RAW = 3
+const BLOCK_DECODE_SKIP = 4
 const MAX_CHUNK_SIZE = 0x2000
 const MODE_BLOCK = 0
 const MODE_RAW = 1
+const MODE_SCR = 2
 
 class BlockDecoder extends Writable {
   constructor() {
@@ -26,8 +30,11 @@ class BlockDecoder extends Writable {
     this._buf = new BufferList()
     this._output = null
     this._blockHandlers = []
+    this._scrBlockHandlers = {}
     this._state = BLOCK_DECODE_HEADER
     this._blockPos = 0
+    this._pos = 0
+    this._skip = 0
     this._chunkRemaining = 0
     this._error = false
     this._inflate = false
@@ -56,6 +63,26 @@ class BlockDecoder extends Writable {
     })
   }
 
+  handleScrBlocks(offset) {
+    this._scrOffset = offset
+    return new Promise((res, rej) => {
+      this._blockHandlers.push({ resolve: res, reject: rej, mode: MODE_SCR })
+      if (this._state === BLOCK_DECODE_HEADER && this._blockHandlers.length === 1) {
+        // We didn't have any handler for this block before, so run `process()`
+        this._process()
+      }
+    })
+  }
+
+  scrBlockHandler(tag, size, handler) {
+    const buffer = Buffer.from(tag)
+    if (buffer.length !== 4) {
+      throw new Error('SCR block tags must be 4 bytes')
+    }
+    const tagUint = buffer.readUInt32LE(0)
+    this._scrBlockHandlers[tagUint] = { handler, size }
+  }
+
   useInflate() {
     this._inflate = true
   }
@@ -78,12 +105,50 @@ class BlockDecoder extends Writable {
     return true
   }
 
+  _consume(size) {
+    this._buf.consume(size)
+    this._pos += size
+  }
+
   _process() {
     while (!this._error && this._buf.length > 0) {
       switch (this._state) {
         case BLOCK_DECODE_HEADER: {
           if (this._blockHandlers.length === 0) {
             return
+          }
+          if (this._blockHandlers[0].mode === MODE_RAW) {
+            this._state = BLOCK_DECODE_RAW
+            break
+          }
+          if (this._blockHandlers[0].mode === MODE_SCR) {
+            if (this._pos < this._scrOffset) {
+              this._skip = this._scrOffset - this._pos
+              this._state = BLOCK_DECODE_SKIP
+              break
+            }
+            // SCR blocks tell their block size inline
+            if (!this._requireBufLength(0x14)) {
+              return
+            }
+            const tag = this._buf.readUInt32LE(0)
+            const size = this._buf.readUInt32LE(4)
+            this._consume(8)
+            const handle = this._scrBlockHandlers[tag]
+            if (handle) {
+              this._blockHandlers[0].size = handle.size
+              this._blockHandlers[0].handler = new BufferList((err, buf) => {
+                if (err) {
+                  this.emit('error', err)
+                } else {
+                  handle.handler(buf)
+                }
+              })
+            } else {
+              this._skip = size
+              this._state = BLOCK_DECODE_SKIP
+              break
+            }
           }
           const blockSize = this._blockHandlers[0].size
           // Empty blocks don't even have their header information, so just signal end of block
@@ -94,17 +159,13 @@ class BlockDecoder extends Writable {
             this._blockHandlers.shift()
             break
           }
-          if (this._blockHandlers[0].mode === MODE_RAW) {
-            this._state = BLOCK_DECODE_RAW
-            break
-          }
           if (!this._requireBufLength(0xc)) {
             return
           }
           this._blockPos = 0
           // TODO: Could check the checksum
           const chunks = this._buf.readUInt32LE(4)
-          this._buf.consume(8)
+          this._consume(8)
           const exceptedChunks = Math.ceil(blockSize / MAX_CHUNK_SIZE)
           if (chunks !== exceptedChunks) {
             const error = new Error(`Excepted ${exceptedChunks} chunks, got ${chunks}`)
@@ -121,7 +182,7 @@ class BlockDecoder extends Writable {
           const remaining = this._blockHandlers[0].size - this._blockPos
           const outSize = Math.min(remaining, MAX_CHUNK_SIZE)
           const inSize = this._buf.readUInt32LE(0)
-          this._buf.consume(4)
+          this._consume(4)
           this._chunkRemaining = inSize
           if (this._output) {
             // Remove the possible event listeners that have been added
@@ -159,11 +220,11 @@ class BlockDecoder extends Writable {
           const size = Math.min(this._chunkRemaining, this._buf.length)
           this._chunkRemaining -= size
           this._output.write(this._buf.slice(0, size))
-          this._buf.consume(size)
+          this._consume(size)
           if (this._chunkRemaining === 0) {
             let end = false
             switch (this._blockHandlers[0].mode) {
-              case MODE_BLOCK: {
+              case MODE_BLOCK: case MODE_SCR: {
                 this._blockPos += MAX_CHUNK_SIZE
                 if (this._blockPos >= this._blockHandlers[0].size) {
                   end = true
@@ -177,15 +238,39 @@ class BlockDecoder extends Writable {
             }
             if (end) {
               this._state = BLOCK_DECODE_HEADER
-              const res = this._blockHandlers[0].resolve
-              this._output.end(() => {
-                res()
-              })
-              this._output = null
-              this._blockHandlers.shift()
+              if (this._blockHandlers[0].mode === MODE_SCR) {
+                // SCR data will last until end of file,
+                // no shifting in new handlers.
+                this._output.end()
+                this._output = null
+              } else {
+                const res = this._blockHandlers[0].resolve
+                this._output.end(res)
+                this._output = null
+                this._blockHandlers.shift()
+              }
             }
           }
         } break
+        case BLOCK_DECODE_SKIP: {
+          if (!this._requireBufLength(1)) {
+            return
+          }
+          const size = Math.min(this._skip, this._buf.length)
+          this._skip -= size
+          this._consume(size)
+          if (this._skip === 0) {
+            this._state = BLOCK_DECODE_HEADER
+          }
+        } break
+      }
+    }
+    // SCR data lasts until end of file, so check eof here explicitly
+    if (this._end && this._buf.length === 0 && this._blockHandlers.length > 0) {
+      if (this._blockHandlers[0].mode === MODE_SCR) {
+        this._blockHandlers[0].resolve()
+        this._blockHandlers.clear()
+        return
       }
     }
   }
@@ -364,13 +449,13 @@ class ReplayParser extends Transform {
         if (magic !== REPLAY_MAGIC && magic !== REPLAY_MAGIC_SCR) {
           throw new Error('Not a replay file')
         }
-        this._is_scr = magic === REPLAY_MAGIC_SCR
-        if (this._is_scr) {
+        this._isScr = magic === REPLAY_MAGIC_SCR
+        if (this._isScr) {
           this._decoder.useInflate()
           const offset = await new Promise((res, rej) => {
             this._decoder.rawBlockHandler(4, bufferListStreamPromise(res, rej)).catch(rej)
           })
-          this._scr_offset = offset.readUInt32LE(0)
+          this._scrOffset = offset.readUInt32LE(0)
         }
       }, () => {
         throw new Error('Not a replay file')
@@ -400,13 +485,20 @@ class ReplayParser extends Transform {
 
     Promise.all([cmds, chk])
       .catch(e => this.emit('error', e))
-      .then(() => {
+      .then(async () => {
+        if (this._isScr) {
+          await this._decoder.handleScrBlocks(this._scrOffset)
+        }
         this._finished = true
         this.end()
         if (this._onEnd) {
           this._onEnd()
         }
       })
+  }
+
+  scrSection(tag, size, cb) {
+    this._decoder.scrBlockHandler(tag, size, cb)
   }
 
   pipeChk(stream) {
