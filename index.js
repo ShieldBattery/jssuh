@@ -30,7 +30,7 @@ class BlockDecoder extends Writable {
     this._buf = new BufferList()
     this._output = null
     this._blockHandlers = []
-    this._scrBlockHandlers = {}
+    this._scrBlockHandlers = new Map()
     this._state = BLOCK_DECODE_HEADER
     this._blockPos = 0
     this._pos = 0
@@ -80,7 +80,15 @@ class BlockDecoder extends Writable {
       throw new Error('SCR block tags must be 4 bytes')
     }
     const tagUint = buffer.readUInt32LE(0)
-    this._scrBlockHandlers[tagUint] = { handler, size }
+    const old = this._scrBlockHandlers.get(tagUint)
+    if (old) {
+      if (old.size !== size) {
+        throw new Error(`Conflicting SCR block size for ${tag}: requested ${size}, was ${old.size}`)
+      }
+      old.handlers.push(handler)
+    } else {
+      this._scrBlockHandlers.set(tagUint, { handlers: [handler], size })
+    }
   }
 
   useInflate() {
@@ -134,14 +142,16 @@ class BlockDecoder extends Writable {
             const tag = this._buf.readUInt32LE(0)
             const size = this._buf.readUInt32LE(4)
             this._consume(8)
-            const handle = this._scrBlockHandlers[tag]
+            const handle = this._scrBlockHandlers.get(tag)
             if (handle) {
               this._blockHandlers[0].size = handle.size
               this._blockHandlers[0].handler = new BufferList((err, buf) => {
                 if (err) {
                   this.emit('error', err)
                 } else {
-                  handle.handler(buf)
+                  for (const handler of handle.handlers) {
+                    handler(buf)
+                  }
                 }
               })
             } else {

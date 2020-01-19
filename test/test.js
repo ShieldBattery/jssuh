@@ -160,3 +160,38 @@ test('SCR replay', t => {
     t.deepEqual(actionCount, 3)
   })
 })
+
+test('Raw api for SCR replay sections', t => {
+  const replay = fs.createReadStream('test/scr_replay.rep')
+    .pipe(new ReplayParser())
+  t.plan(6)
+  replay.scrSection('LMTS', 0x1c, limits => {
+    const images = limits.readUInt32LE(0)
+    const sprites = limits.readUInt32LE(4)
+    const lone = limits.readUInt32LE(8)
+    const units = limits.readUInt32LE(0xc)
+    t.deepEqual(images, 10000)
+    t.deepEqual(sprites, 5000)
+    t.deepEqual(lone, 1000)
+    t.deepEqual(units, 3400)
+  })
+  replay.scrSection('LMTS', 0x1c, limits => {
+    t.pass('Second callback for same section works')
+  })
+  replay.scrSection('BFIX', 0x8, bfix => {
+    t.pass('Got also BFIX section')
+  })
+  replay.scrSection('UNK2', 0x8, sect => {
+    t.fail('This section doesn\'t exist')
+  })
+})
+
+test('Conflicting SCR section sizes are an error', t => {
+  const replay = fs.createReadStream('test/scr_replay.rep')
+    .pipe(new ReplayParser())
+  t.plan(1)
+  t.throws(() => {
+    replay.scrSection('BFIX', 0x8, () => {})
+    replay.scrSection('BFIX', 0xc, () => {})
+  }, /BFIX/)
+})

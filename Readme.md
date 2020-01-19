@@ -81,3 +81,18 @@ does not work.
 ## parser.pipeChk(stream)
 The replay's map (scenario.chk) can be accessed with `parser.pipeChk(stream)`. See
 [bw-chk](https://github.com/neivv/bw-chk) for parsing the map data.
+
+## parser.scrSection(tag, size, callback)
+SCR replay format can have arbitrary byte streams that are identified with a 4-byte tag
+string.
+
+If you know how the section's expected size, you can give the parser a callback
+to run with section's data. Note that if the replay doesn't contain a section with the tag,
+there won't be an error, the callback will just not be run.
+
+Example:
+```javascript
+parser.scrSection('LMTS', 0x1c, bytes => {
+  // process...
+})
+```
