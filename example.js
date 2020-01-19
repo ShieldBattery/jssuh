@@ -1,4 +1,4 @@
-/* eslint no-console: ["allow"] */
+/* eslint no-console: [0] */
 
 const fs = require('fs')
 const ReplayParser = require('./index.js')
@@ -44,15 +44,15 @@ reppi.on('data', ({ id, frame, player }) => {
 reppi.on('error', err => {
   console.log(`Rip rap nib nab ${err}`)
 })
-reppi.on('end', err => {
-  console.log(`Done`)
+reppi.on('end', () => {
+  console.log('Done')
 })
 
-reppi.scrSection('SKIN', 0xaf * 2 * 16, skin_data => {
-  console.log(`0x${skin_data.length.toString(16)} bytes of skin data`)
+reppi.scrSection('SKIN', 0xaf * 2 * 16, skinData => {
+  console.log(`0x${skinData.length.toString(16)} bytes of skin data`)
 })
 reppi.scrSection('LMTS', 0x1c, limits => {
-  console.log(`Limits:`)
+  console.log('Limits:')
   console.log(`  Images: ${limits.readUInt32LE(0)}`)
   console.log(`  Sprites: ${limits.readUInt32LE(4)}`)
   console.log(`  Thingies(?): ${limits.readUInt32LE(8)}`)

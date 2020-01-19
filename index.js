@@ -1,6 +1,6 @@
 'use strict';
 
-const BufferList = require('bl')
+const { BufferList, BufferListStream } = require('bl')
 const iconv = require('iconv-lite')
 const decodeImplode = require('implode-decoder')
 
@@ -145,7 +145,7 @@ class BlockDecoder extends Writable {
             const handle = this._scrBlockHandlers.get(tag)
             if (handle) {
               this._blockHandlers[0].size = handle.size
-              this._blockHandlers[0].handler = new BufferList((err, buf) => {
+              this._blockHandlers[0].handler = new BufferListStream((err, buf) => {
                 if (err) {
                   this.emit('error', err)
                 } else {
@@ -425,7 +425,7 @@ class ReplayParser extends Transform {
     this._finished = false
 
     const bufferListStreamPromise = (res, rej) => (
-      new BufferList((err, buf) => {
+      new BufferListStream((err, buf) => {
         if (err) {
           rej(err)
         } else {
