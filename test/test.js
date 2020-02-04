@@ -42,7 +42,7 @@ test('Bad file', t => {
 test('Regular replay', t => {
   const replay = fs.createReadStream('test/things.rep')
     .pipe(new ReplayParser())
-  t.plan(12)
+  t.plan(13)
   replay.on('replayHeader', header => {
     t.deepEqual(header.players.length, 4)
     t.deepEqual(header.gameName, 'neiv')
@@ -51,6 +51,7 @@ test('Regular replay', t => {
     t.deepEqual(header.gameSubtype, 2)
     t.deepEqual(header.durationFrames, 894)
     t.deepEqual(header.seed, 0x580cbf56)
+    t.deepEqual(header.remastered, false)
     for (const player of header.players) {
       if (player.name === 'neiv') {
         t.deepEqual(player.race, 'zerg')
@@ -133,12 +134,13 @@ test('Missing chk', t => {
 test('SCR replay', t => {
   const replay = fs.createReadStream('test/scr_replay.rep')
     .pipe(new ReplayParser())
-  t.plan(12)
+  t.plan(13)
   replay.on('replayHeader', header => {
     t.deepEqual(header.players.length, 2)
     t.deepEqual(header.gameName, 'u')
     t.deepEqual(header.gameType, 2)
     t.deepEqual(header.gameSubtype, 1)
+    t.deepEqual(header.remastered, true)
     for (const player of header.players) {
       if (player.name === 'u') {
         t.deepEqual(player.race, 'terran')

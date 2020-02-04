@@ -423,6 +423,7 @@ class ReplayParser extends Transform {
     this._decoder = new BlockDecoder()
     this._chkPipe = null
     this._finished = false
+    this._isScr = false
 
     const bufferListStreamPromise = (res, rej) => (
       new BufferListStream((err, buf) => {
@@ -473,7 +474,7 @@ class ReplayParser extends Transform {
     const header = magic.then(() => decodeToBuffer(0x279))
       .then(buf => {
         this._setupPlayerMappings(buf)
-        this._emitHeader(buf, opts.encoding)
+        this._emitHeader(buf, opts.encoding, this._isScr)
       })
     const cmdsSize = magic.then(() => decodeToBuffer(0x4))
       .then(buf => buf.readUInt32LE(0))
@@ -526,7 +527,7 @@ class ReplayParser extends Transform {
     }
   }
 
-  _emitHeader(buf, encoding) {
+  _emitHeader(buf, encoding, remastered) {
     const cstring = buf => {
       let text = buf
       const end = buf.indexOf(0)
@@ -583,6 +584,7 @@ class ReplayParser extends Transform {
       players,
       durationFrames,
       seed,
+      remastered,
     }
     this.emit('replayHeader', header)
   }

@@ -37,7 +37,7 @@ header information in following format:
   gameName,
   // The map title.
   mapName,
-  // Game type (melee, ums, etc). Currently just exposed as a integer
+  // Game type (melee, ums, etc). Currently just exposed as a integer.
   gameType,
   // Game type modifier (Top vs bottom team layout, greed victory conditions, etc).
   gameSubtype,
@@ -45,8 +45,10 @@ header information in following format:
   players,
   // The duration of the game, in frames (1 / 24th of a second on fastest speed).
   durationFrames,
-  // Initial random seed, which is also the timestamp of the replay
+  // Initial random seed, which is also the timestamp of the replay.
   seed,
+  // True if the replay uses StarCraft Remastered format, false for older replays.
+  remastered,
 }
 ```
 
