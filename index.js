@@ -24,6 +24,69 @@ const MODE_BLOCK = 0
 const MODE_RAW = 1
 const MODE_SCR = 2
 
+// SCR replays contain inflate streams.
+// However, the older replay format for some years after SCR release,
+// and the only way to know their compression type is to see if the
+// compressed stream starts with 0x78, 0x9c or not
+// This class will also have a member `hadInflate` that gets set if
+// any inflate streams were met so the parent can see if the replay
+// is usable on 1.16.1 or not
+class Decompressor {
+  constructor() {
+    this.hadInflate = false
+  }
+
+  newDecompressStream() {
+    return new DecompressStream(this)
+  }
+}
+
+class DecompressStream extends Transform {
+  constructor(parent) {
+    super()
+    this._parent = parent
+    this._stream = null
+    // Buffering just in case for the stupid stream which writes one byte at a time.
+    this._buffer = null
+  }
+
+  _transform(block, enc, done) {
+    if (this._stream === null) {
+      if (this._buffer !== null || block.length < 2) {
+        if (this._buffer === null) {
+          this._buffer = new BufferList()
+        }
+        this._buffer.append(block)
+        if (this._buffer.length < 2) {
+          return done();
+        }
+      }
+      if (this._buffer !== null) {
+        block = this._buffer
+      }
+      if (block.readUInt16LE(0) === 0x9c78) {
+        this._stream = zlib.createInflate()
+        this._parent.hadInflate = true
+      } else {
+        this._stream = decodeImplode()
+      }
+      this._stream.on('data', d => this.emit('data', d))
+      this._stream.on('close', () => this.emit('close'))
+      this._stream.on('end', () => this.emit('end'))
+      this._stream.on('error', e => this.emit('error', e))
+    }
+    return this._stream.write(block, enc, done)
+  }
+
+  _flush(done) {
+    if (this._stream === null) {
+      done()
+    } else {
+      this._stream.end(done)
+    }
+  }
+}
+
 class BlockDecoder extends Writable {
   constructor() {
     super()
@@ -37,7 +100,7 @@ class BlockDecoder extends Writable {
     this._skip = 0
     this._chunkRemaining = 0
     this._error = false
-    this._inflate = false
+    this._decompressor = new Decompressor()
   }
 
   // The promise resolves once the entire block has been parsed
@@ -91,8 +154,8 @@ class BlockDecoder extends Writable {
     }
   }
 
-  useInflate() {
-    this._inflate = true
+  hadInflatedData() {
+    return this._decompressor.hadInflate;
   }
 
   _write(block, enc, done) {
@@ -202,11 +265,7 @@ class BlockDecoder extends Writable {
           if (outSize === inSize) {
             this._output = this._blockHandlers[0].handler
           } else {
-            if (this._inflate) {
-              this._output = zlib.createInflate()
-            } else {
-              this._output = decodeImplode()
-            }
+            this._output = this._decompressor.newDecompressStream()
             const rej = this._blockHandlers[0].reject
             this._output.on('error', e => rej(e))
             this._output.pipe(this._blockHandlers[0].handler)
@@ -462,7 +521,6 @@ class ReplayParser extends Transform {
         }
         this._isScr = magic === REPLAY_MAGIC_SCR
         if (this._isScr) {
-          this._decoder.useInflate()
           const offset = await new Promise((res, rej) => {
             this._decoder.rawBlockHandler(4, bufferListStreamPromise(res, rej)).catch(rej)
           })
@@ -473,8 +531,9 @@ class ReplayParser extends Transform {
       })
     const header = magic.then(() => decodeToBuffer(0x279))
       .then(buf => {
+        const isScr = this._isScr || this._decoder.hadInflatedData()
         this._setupPlayerMappings(buf)
-        this._emitHeader(buf, opts.encoding, this._isScr)
+        this._emitHeader(buf, opts.encoding, isScr)
       })
     const cmdsSize = magic.then(() => decodeToBuffer(0x4))
       .then(buf => buf.readUInt32LE(0))

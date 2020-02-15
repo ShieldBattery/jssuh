@@ -1,6 +1,6 @@
 {
   "name": "jssuh",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Reads broodwar replays",
   "main": "index.js",
   "files": ["index.js"],

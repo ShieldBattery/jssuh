@@ -197,3 +197,16 @@ test('Conflicting SCR section sizes are an error', t => {
     replay.scrSection('BFIX', 0xc, () => {})
   }, /BFIX/)
 })
+
+test('Old SCR replay', t => {
+  const replay = fs.createReadStream('test/scr_old.rep')
+    .pipe(new ReplayParser())
+  t.plan(5)
+  replay.on('replayHeader', header => {
+    t.deepEqual(header.players.length, 2)
+    t.deepEqual(header.gameName, 'u')
+    t.deepEqual(header.gameType, 3)
+    t.deepEqual(header.gameSubtype, 1)
+    t.deepEqual(header.remastered, true)
+  })
+})
