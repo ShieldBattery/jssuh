@@ -19,6 +19,7 @@ const BLOCK_DECODE_CHUNK = 1
 const BLOCK_DECODE_DATA = 2
 const BLOCK_DECODE_RAW = 3
 const BLOCK_DECODE_SKIP = 4
+const BLOCK_WAIT = 5
 const MAX_CHUNK_SIZE = 0x2000
 const MODE_BLOCK = 0
 const MODE_RAW = 1
@@ -62,7 +63,7 @@ class DecompressStream extends Transform {
         }
       }
       if (this._buffer !== null) {
-        block = this._buffer
+        block = this._buffer.slice()
       }
       if (block.readUInt16LE(0) === 0x9c78) {
         this._stream = zlib.createInflate()
@@ -257,27 +258,18 @@ class BlockDecoder extends Writable {
           const inSize = this._buf.readUInt32LE(0)
           this._consume(4)
           this._chunkRemaining = inSize
-          if (this._output) {
-            // Remove the possible event listeners that have been added
-            // if the previous chunk was decodeImplode-piped to _output
-            this._output.unpipe()
-          }
           if (outSize === inSize) {
             this._output = this._blockHandlers[0].handler
           } else {
             this._output = this._decompressor.newDecompressStream()
             const rej = this._blockHandlers[0].reject
             this._output.on('error', e => rej(e))
-            this._output.pipe(this._blockHandlers[0].handler)
+            const isLastChunk = remaining <= MAX_CHUNK_SIZE
+            this._output.pipe(this._blockHandlers[0].handler, { end: isLastChunk })
           }
           this._state = BLOCK_DECODE_DATA
         } break
         case BLOCK_DECODE_RAW: {
-          if (this._output) {
-            // Remove the possible event listeners that have been added
-            // if the previous chunk was decodeImplode-piped to _output
-            this._output.unpipe()
-          }
           this._output = this._blockHandlers[0].handler
           this._state = BLOCK_DECODE_DATA
           this._chunkRemaining = this._blockHandlers[0].size
@@ -305,19 +297,32 @@ class BlockDecoder extends Writable {
                 end = true
               } break
             }
+            const isDecompressOutput = this._output !== this._blockHandlers[0].handler
             if (end) {
               this._state = BLOCK_DECODE_HEADER
               if (this._blockHandlers[0].mode === MODE_SCR) {
                 // SCR data will last until end of file,
                 // no shifting in new handlers.
-                this._output.end()
+                this._state = BLOCK_WAIT
+                this._output.end(() => {
+                  this._state = BLOCK_DECODE_HEADER
+                  this._process()
+                })
                 this._output = null
+                return
               } else {
                 const res = this._blockHandlers[0].resolve
                 this._output.end(res)
                 this._output = null
                 this._blockHandlers.shift()
               }
+            } else if (isDecompressOutput) {
+              this._state = BLOCK_WAIT
+              this._output.end(() => {
+                this._output.unpipe()
+                this._state = BLOCK_DECODE_CHUNK
+                this._process()
+              })
             }
           }
         } break
@@ -332,13 +337,17 @@ class BlockDecoder extends Writable {
             this._state = BLOCK_DECODE_HEADER
           }
         } break
+        case BLOCK_WAIT: {
+          // Nothing, handled by end callback of whoever waits
+          return
+        }
       }
     }
     // SCR data lasts until end of file, so check eof here explicitly
     if (this._end && this._buf.length === 0 && this._blockHandlers.length > 0) {
       if (this._blockHandlers[0].mode === MODE_SCR) {
         this._blockHandlers[0].resolve()
-        this._blockHandlers.clear()
+        this._blockHandlers = []
         return
       }
     }

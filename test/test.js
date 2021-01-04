@@ -210,3 +210,17 @@ test('Old SCR replay', t => {
     t.deepEqual(header.remastered, true)
   })
 })
+
+test('Read all of the multi-chunk blocks', t => {
+  const replay = fs.createReadStream('test/rep2.rep')
+    .pipe(new ReplayParser())
+  t.plan(1)
+  let actionCount = 0
+  replay.on('data', cmd => {
+    actionCount += 1
+  })
+  replay.on('error', e => t.fail(e))
+  replay.on('end', () => {
+    t.deepEqual(actionCount, 9916)
+  })
+})

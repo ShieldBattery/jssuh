@@ -6,6 +6,8 @@ const ReplayParser = require('./index.js')
 const reppi = fs.createReadStream(process.argv[2])
   .pipe(new ReplayParser())
 
+reppi.pipeChk(fs.createWriteStream('scenario.chk'))
+
 reppi.on('replayHeader', header => {
   const {
     gameName,
@@ -42,7 +44,7 @@ reppi.on('data', ({ id, frame, player }) => {
 })
 
 reppi.on('error', err => {
-  console.log(`Rip rap nib nab ${err}`)
+  console.log(`An error occured: ${err} ${err.stack}`)
 })
 reppi.on('end', () => {
   console.log('Done')
