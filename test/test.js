@@ -224,3 +224,40 @@ test('Read all of the multi-chunk blocks', t => {
     t.deepEqual(actionCount, 9916)
   })
 })
+
+test('Raw extended block', t => {
+  const replay = fs.createReadStream('test/sb.rep')
+    .pipe(new ReplayParser())
+  t.plan(10)
+  replay.rawScrSection('Sbat', data => {
+    t.deepEqual(data.length, 0x58)
+    const version = data.readUInt16LE(0)
+    t.deepEqual(version, 1)
+    const build = data.readUInt16LE(2)
+    const sbatVersion = data.subarray(0x6, 0x16)
+    const gameId = data.subarray(0x26, 0x36)
+    t.deepEqual(build, 10145)
+    t.deepEqual(sbatVersion.toString(), '8.1.0\0\0\0\0\0\0\0\0\0\0\0')
+    t.deepEqual(gameId, Buffer.from([
+        0x11, 0x59, 0x14, 0xE4, 0x78, 0x3B, 0x4F, 0x14,
+        0xA1, 0x6C, 0xFB, 0x62, 0x61, 0xAF, 0x9B, 0x5B,
+    ]))
+  })
+  replay.rawScrSection('BFIX', data => {
+    t.deepEqual(data, Buffer.from([
+        0x6C, 0x2E, 0x97, 0x1E, 0x01, 0x00, 0x00, 0x00,
+        0x08, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+   ]))
+  })
+  replay.scrSection('LMTS', 0x1c, limits => {
+    const images = limits.readUInt32LE(0)
+    const sprites = limits.readUInt32LE(4)
+    const lone = limits.readUInt32LE(8)
+    const units = limits.readUInt32LE(0xc)
+    t.deepEqual(images, 10000)
+    t.deepEqual(sprites, 5000)
+    t.deepEqual(lone, 1000)
+    t.deepEqual(units, 3400)
+  })
+})

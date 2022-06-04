@@ -101,6 +101,7 @@ class BlockDecoder extends Writable {
     this._skip = 0
     this._chunkRemaining = 0
     this._error = false
+    this._rawScrBlock = false
     this._decompressor = new Decompressor()
   }
 
@@ -138,7 +139,12 @@ class BlockDecoder extends Writable {
     })
   }
 
-  scrBlockHandler(tag, size, handler) {
+  // If `rawData` is true, just forward the extension block without decompressing it; `size`
+  // will be unused.
+  // If `rawData` is false, assume the extension block is similar list of deflated blocks
+  // that the main replay file is, in which case the user must know size beforehand to
+  // decompress the data properly.
+  scrBlockHandler(tag, size, handler, rawData) {
     const buffer = Buffer.from(tag)
     if (buffer.length !== 4) {
       throw new Error('SCR block tags must be 4 bytes')
@@ -151,7 +157,7 @@ class BlockDecoder extends Writable {
       }
       old.handlers.push(handler)
     } else {
-      this._scrBlockHandlers.set(tagUint, { handlers: [handler], size })
+      this._scrBlockHandlers.set(tagUint, { handlers: [handler], size, rawData })
     }
   }
 
@@ -218,6 +224,12 @@ class BlockDecoder extends Writable {
                   }
                 }
               })
+              if (handle.rawData) {
+                this._blockHandlers[0].size = size
+                this._state = BLOCK_DECODE_RAW
+                this._rawScrBlock = true
+                break
+              }
             } else {
               this._skip = size
               this._state = BLOCK_DECODE_SKIP
@@ -287,7 +299,8 @@ class BlockDecoder extends Writable {
             switch (this._blockHandlers[0].mode) {
               case MODE_BLOCK: case MODE_SCR: {
                 this._blockPos += MAX_CHUNK_SIZE
-                if (this._blockPos >= this._blockHandlers[0].size) {
+                if (this._blockPos >= this._blockHandlers[0].size || this._rawScrBlock) {
+                  this._rawScrBlock = false
                   end = true
                 } else {
                   this._state = BLOCK_DECODE_CHUNK
@@ -576,8 +589,12 @@ class ReplayParser extends Transform {
       })
   }
 
-  scrSection(tag, size, cb) {
-    this._decoder.scrBlockHandler(tag, size, cb)
+  scrSection(tag, size, cb, rawData = false) {
+    this._decoder.scrBlockHandler(tag, size, cb, false)
+  }
+
+  rawScrSection(tag, cb) {
+    this._decoder.scrBlockHandler(tag, 0, cb, true)
   }
 
   pipeChk(stream) {

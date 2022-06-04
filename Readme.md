@@ -85,16 +85,37 @@ The replay's map (scenario.chk) can be accessed with `parser.pipeChk(stream)`. S
 [bw-chk](https://github.com/neivv/bw-chk) for parsing the map data.
 
 ## parser.scrSection(tag, size, callback)
-SCR replay format can have arbitrary byte streams that are identified with a 4-byte tag
+SC:R replay format can have arbitrary byte streams that are identified with a 4-byte tag
 string.
 
 If you know how the section's expected size, you can give the parser a callback
 to run with section's data. Note that if the replay doesn't contain a section with the tag,
 there won't be an error, the callback will just not be run.
 
+All currently known official SC:R byte streams use the same split-to-chunk compression as the
+main replay, but the format can allow arbitrary data to be added. Use `rawScrSection` if you
+the extended section does not use the regular compression
+
 Example:
 ```javascript
 parser.scrSection('LMTS', 0x1c, bytes => {
   // process...
+})
+```
+
+## parser.rawScrSection(tag, callback)
+Forwards SC:R replay section to a callback without assuming anything about it.
+
+While all Blizzrd's replay sections (as of writing this) use the compression that
+`parser.scrSection` can be used to decompress for you, `rawScrSection` can be used to access the
+raw bytes for sections that use some other format or are not compressed at all.
+
+Similar to `scrSection`, if the replay doesn't contain a section with the tag,
+there won't be an error, the callback will just not be run.
+
+Example:
+```javascript
+parser.rawScrSection('Sbat', bytes => {
+  // process ShieldBattery extension ...
 })
 ```
