@@ -3,7 +3,9 @@
   "version": "1.5.0",
   "description": "Reads broodwar replays",
   "main": "index.js",
-  "files": ["index.js"],
+  "files": [
+    "index.js"
+  ],
   "scripts": {
     "lint": "eslint .",
     "prepublishOnly": "npm run lint && npm run test",
@@ -19,12 +21,12 @@
   "author": "Markus Heikkinen <ittevien@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "bl": "^4.0.0",
-    "iconv-lite": "^0.5.1",
+    "bl": "^6.0.0",
+    "iconv-lite": "^0.6.3",
     "implode-decoder": "^1.0.1"
   },
   "devDependencies": {
-    "eslint": "^6.8.0",
-    "tape": "^4.13.0"
+    "eslint": "^8.30.0",
+    "tape": "^5.6.1"
   }
 }
